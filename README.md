@@ -16,10 +16,10 @@ By default all motors are enabled and stopped.
 ## AMQP
 
 
-| AMQP channel      | IN/OUT | Content-Type                  | Data         | Description                                     |
-| ----------------- | ------ | ----------------------------- | ------------ | ----------------------------------------------- |
-| bbdcmotors_ctrl   | IN     | application/dcmotor_forward   | uint32 [0-3] | Set motor to forward state (CW)                 |
-| bbdcmotors_ctrl   | IN     | application/dcmotor_backward  | uint32 [0-3] | Set motor to backward state (CCW)               |
-| bbdcmotors_ctrl   | IN     | application/dcmotor_stop      | uint32 [0-3] | Set motor to stopped state                      |
-| bbdcmotors_ctrl   | IN     | application/dcmotor_speed     | uint32       | Change all motors speed (default duty is 1000). |
-| bbdcmotors_events | OUT    | --                            | --           | Unused                                          |
+| AMQP channel      | IN/OUT | Content-Type                  | Data           | Description                                     |
+| ----------------- | ------ | ----------------------------- | -------------  | ----------------------------------------------- |
+| bbdcmotors_ctrl   | IN     | application/dcmotor_forward   | uint32 [1-4]   | Set motor to forward state (CW)                 |
+| bbdcmotors_ctrl   | IN     | application/dcmotor_backward  | uint32 [1-4]   | Set motor to backward state (CCW)               |
+| bbdcmotors_ctrl   | IN     | application/dcmotor_stop      | uint32 [1-4]   | Set motor to stopped state                      |
+| bbdcmotors_ctrl   | IN     | application/dcmotor_speed     | uint32 [1-100] | Change all motors speed in % (default duty is 30). |
+| bbdcmotors_events | OUT    | --                            | --             | Unused                                          |

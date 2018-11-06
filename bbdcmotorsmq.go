@@ -18,7 +18,7 @@ import (
 )
 
 const defaultWait = 10 * time.Millisecond
-const defaultDCFrequency = 1000
+const defaultDCFrequency = 30
 const defaultDuty = 1000
 const directionForward = 1
 const directionBackward = 2
@@ -110,10 +110,10 @@ func InitBBDCMotorsMQ(configFile string) (*BBDCMotorsMQ, error) {
 	mmq.killed = false
 	mmq.speedDuty = defaultDuty
 
-	mmq.EnableDC(0, true)
 	mmq.EnableDC(1, true)
 	mmq.EnableDC(2, true)
 	mmq.EnableDC(3, true)
+	mmq.EnableDC(4, true)
 
 	return &mmq, nil
 }
@@ -142,23 +142,38 @@ func (mmq *BBDCMotorsMQ) ReceiveCommands() error {
 			switch d.ContentType {
 			case "application/dcmotor_forward":
 				motorID := binary.BigEndian.Uint32(d.Body)
-				log.Printf("DC motor %d forward", motorID)
-				mmq.MoveDC(motorID, directionForward, mmq.speedDuty)
+				err := mmq.MoveDC(motorID, directionForward, mmq.speedDuty)
+				if err != nil {
+					log.Println(err)
+				} else {
+					log.Printf("DC motor %d forward", motorID)
+				}
 			case "application/dcmotor_backward":
 				motorID := binary.BigEndian.Uint32(d.Body)
-				log.Printf("DC motor %d backward", motorID)
-				mmq.MoveDC(motorID, directionBackward, mmq.speedDuty)
+				err := mmq.MoveDC(motorID, directionBackward, mmq.speedDuty)
+				if err != nil {
+					log.Println(err)
+				} else {
+					log.Printf("DC motor %d backward", motorID)
+				}
 			case "application/dcmotor_stop":
 				motorID := binary.BigEndian.Uint32(d.Body)
-				log.Printf("DC motor %d stopped", motorID)
-				mmq.StopDC(motorID)
+				err := mmq.StopDC(motorID)
+				if err != nil {
+					log.Println(err)
+				} else {
+					log.Printf("DC motor %d stopped", motorID)
+				}
 			case "application/dcmotor_speed":
 				speedDuty := binary.BigEndian.Uint32(d.Body)
 				mmq.speedDuty = speedDuty
-				mmq.ChangeSpeedDC(0, mmq.speedDuty)
-				mmq.ChangeSpeedDC(1, mmq.speedDuty)
+				err := mmq.ChangeSpeedDC(1, mmq.speedDuty)
+				if err != nil {
+					log.Println(err)
+				}
 				mmq.ChangeSpeedDC(2, mmq.speedDuty)
 				mmq.ChangeSpeedDC(3, mmq.speedDuty)
+				mmq.ChangeSpeedDC(4, mmq.speedDuty)
 				log.Printf("Changed speed to %d", mmq.speedDuty)
 			default:
 				log.Printf("Received unexpected message: %s", d.Body)
@@ -196,7 +211,7 @@ func (mmq *BBDCMotorsMQ) writeWord(reg byte, value uint32) error {
 	}
 	fmt.Println("")
 
-	_, err := mmq.i2c.Write(byteSeq)
+	_, err := mmq.i2c.WriteBytes(byteSeq)
 
 	if err != nil {
 		fmt.Printf("Write failed: %s\n", err.Error())
@@ -218,7 +233,7 @@ func (mmq *BBDCMotorsMQ) writeHalfWord(reg byte, value uint16) error {
 		fmt.Printf("%02x", z)
 	}
 	fmt.Println("")
-	_, err := mmq.i2c.Write(byteSeq)
+	_, err := mmq.i2c.WriteBytes(byteSeq)
 
 	if err != nil {
 		fmt.Printf("Write failed: %s\n", err.Error())
@@ -238,7 +253,7 @@ func (mmq *BBDCMotorsMQ) writeByte(reg byte, value byte) error {
 		fmt.Printf("%02x", z)
 	}
 	fmt.Println("")
-	_, err := mmq.i2c.Write(byteSeq)
+	_, err := mmq.i2c.WriteBytes(byteSeq)
 
 	if err != nil {
 		fmt.Printf("Write failed: %s\n", err.Error())
@@ -279,12 +294,16 @@ func getDCRegisters(dc uint32) (mode byte, direction byte, duty byte, err error)
 }
 
 func (mmq *BBDCMotorsMQ) EnableDC(dc uint32, enable bool) error {
+	if (dc <= 0) || (dc > 4) {
+		return errors.New("Invalid motor ID")
+	}
+
 	modeReg, directionReg, _, err := getDCRegisters(dc)
 	if err != nil {
 		return err
 	}
 
-	mmq.writeWord(CONFIG_TB_PWM_FREQ, defaultDCFrequency)
+	mmq.writeWord(CONFIG_TB_PWM_FREQ, mmq.speedDuty)
 	time.Sleep(defaultWait)
 	mmq.writeByte(modeReg, TB_DCM)
 	time.Sleep(defaultWait)
@@ -295,6 +314,12 @@ func (mmq *BBDCMotorsMQ) EnableDC(dc uint32, enable bool) error {
 }
 
 func (mmq *BBDCMotorsMQ) ChangeSpeedDC(dc uint32, duty uint32) error {
+	if (dc <= 0) || (dc > 4) {
+		return errors.New("Invalid motor ID (1-4)")
+	}
+	if (duty <= 0) || (duty > 100) {
+		return errors.New("Invalid speed (1-100)")
+	}
 	_, _, dutyReg, err := getDCRegisters(dc)
 	if err != nil {
 		return err
@@ -306,6 +331,11 @@ func (mmq *BBDCMotorsMQ) ChangeSpeedDC(dc uint32, duty uint32) error {
 }
 
 func (mmq *BBDCMotorsMQ) MoveDC(dc uint32, direction byte, duty uint32) error {
+
+	if (dc <= 0) || (dc > 4) {
+		return errors.New("Invalid motor ID")
+	}
+
 	_, directionReg, dutyReg, err := getDCRegisters(dc)
 	if err != nil {
 		return err
@@ -319,6 +349,11 @@ func (mmq *BBDCMotorsMQ) MoveDC(dc uint32, direction byte, duty uint32) error {
 }
 
 func (mmq *BBDCMotorsMQ) StopDC(dc uint32) error {
+
+	if (dc <= 0) || (dc > 4) {
+		return errors.New("Invalid motor ID")
+	}
+
 	_, directionReg, _, err := getDCRegisters(dc)
 	if err != nil {
 		return err
