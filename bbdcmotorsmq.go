@@ -22,6 +22,10 @@ const defaultDCFrequency = 30
 const defaultDuty = 1000
 const directionForward = 1
 const directionBackward = 2
+const (
+	exchangeCtrl   = "bbdcmotors_ctrl"
+	exchangeEvents = "bbdcmotors_events"
+)
 
 type BBDCMotorsConfig struct {
 	I2CAddress byte
@@ -31,15 +35,14 @@ type BBDCMotorsConfig struct {
 }
 
 type BBDCMotorsMQ struct {
-	config      BBDCMotorsConfig
-	ctrl        *bbhw.MMappedGPIO
-	i2c         *i2c.I2C
-	killed      bool
-	conn        *amqp.Connection
-	ch          *amqp.Channel
-	ctrlQueue   amqp.Queue
-	streamQueue amqp.Queue
-	speedDuty   uint32
+	config    BBDCMotorsConfig
+	ctrl      *bbhw.MMappedGPIO
+	i2c       *i2c.I2C
+	killed    bool
+	conn      *amqp.Connection
+	ch        *amqp.Channel
+	ctrlQueue amqp.Queue
+	speedDuty uint32
 }
 
 func InitBBDCMotorsMQ(configFile string) (*BBDCMotorsMQ, error) {
@@ -81,32 +84,53 @@ func InitBBDCMotorsMQ(configFile string) (*BBDCMotorsMQ, error) {
 		return nil, err
 	}
 
-	//Create control queue
+	//Setup Control exchange & queue
+	err = mmq.ch.ExchangeDeclare(
+		exchangeCtrl, // name
+		"fanout",     // type
+		true,         // durable
+		false,        // auto-deleted
+		false,        // internal
+		false,        // no-wait
+		nil,          // arguments
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	mmq.ctrlQueue, err = mmq.ch.QueueDeclare(
-		"bbdcmotors_ctrl", // name
-		false,             // durable
-		false,             // delete when unused
-		false,             // exclusive
-		false,             // no-wait
-		nil,               // arguments
+		"",    // name
+		false, // durable
+		false, // delete when usused
+		true,  // exclusive
+		false, // no-wait
+		nil,   // arguments
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	//Create events queue
-	mmq.streamQueue, err = mmq.ch.QueueDeclare(
-		"bbdcmotors_events", // name
-		false,               // durable
-		false,               // delete when unused
-		false,               // exclusive
-		true,                // no-wait
-		nil,                 // arguments
+	//Bind this queue to this exchange so that exchange will publish here
+	err = mmq.ch.QueueBind(
+		mmq.ctrlQueue.Name, // queue name
+		"",                 // routing key
+		exchangeCtrl,       // exchange
+		false,
+		nil)
+
+	//Setup events exchange
+	err = mmq.ch.ExchangeDeclare(
+		exchangeEvents, // name
+		"fanout",       // type
+		true,           // durable
+		false,          // auto-deleted
+		false,          // internal
+		false,          // no-wait
+		nil,            // arguments
 	)
 	if err != nil {
 		return nil, err
 	}
-
 	mmq.killed = false
 	mmq.speedDuty = defaultDuty
 

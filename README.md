@@ -16,7 +16,7 @@ By default all motors are enabled and stopped.
 ## AMQP
 
 
-| AMQP channel      | IN/OUT | Content-Type                  | Data           | Description                                     |
+| AMQP exchange      | IN/OUT | Content-Type                  | Data           | Description                                     |
 | ----------------- | ------ | ----------------------------- | -------------  | ----------------------------------------------- |
 | bbdcmotors_ctrl   | IN     | application/dcmotor_forward   | uint32 [1-4]   | Set motor to forward state (CW)                 |
 | bbdcmotors_ctrl   | IN     | application/dcmotor_backward  | uint32 [1-4]   | Set motor to backward state (CCW)               |
