@@ -50,7 +50,7 @@ type BBDCMotorsMQ struct {
 	ctrlQueue amqp.Queue
 	speedDuty uint32
 
-	motorsTicks []*bbhw.MMappedGPIO
+	motorsTicks [4]*bbhw.MMappedGPIO
 }
 
 func InitBBDCMotorsMQ(configFile string) (*BBDCMotorsMQ, error) {
@@ -82,6 +82,7 @@ func InitBBDCMotorsMQ(configFile string) (*BBDCMotorsMQ, error) {
 	time.Sleep(defaultWait)
 
 	//Setup GPIO for motors counters
+	//mmq.motorsTicks = make(*bbhw.MMappedGPIO, 4)
 	mmq.motorsTicks[0] = bbhw.NewMMappedGPIO(mmq.config.MotorsTicksPins[0], bbhw.IN)
 	mmq.motorsTicks[1] = bbhw.NewMMappedGPIO(mmq.config.MotorsTicksPins[1], bbhw.IN)
 	mmq.motorsTicks[2] = bbhw.NewMMappedGPIO(mmq.config.MotorsTicksPins[2], bbhw.IN)
@@ -232,8 +233,8 @@ func (mmq *BBDCMotorsMQ) ReceiveCommands() error {
 				mmq.ChangeSpeedDC(4, mmq.speedDuty)
 				log.Printf("Changed speed to %d", mmq.speedDuty)
 			case "application/dcmotor_forward_for_ticks":
-				motorID := binary.BigEndian.Uint32(d.Body[0:3])
-				ticks := binary.BigEndian.Uint32(d.Body[4:7])
+				motorID := binary.BigEndian.Uint32(d.Body[0:4])
+				ticks := binary.BigEndian.Uint32(d.Body[4:8])
 				err := mmq.MoveDC(motorID, directionForward, mmq.speedDuty)
 				if err != nil {
 					log.Println(err)
@@ -243,8 +244,8 @@ func (mmq *BBDCMotorsMQ) ReceiveCommands() error {
 
 				go mmq.autoStopInTicks(motorID, ticks, maxMoveTicksDuration)
 			case "application/dcmotor_backward_for_ticks":
-				motorID := binary.BigEndian.Uint32(d.Body[0:3])
-				ticks := binary.BigEndian.Uint32(d.Body[4:7])
+				motorID := binary.BigEndian.Uint32(d.Body[0:4])
+				ticks := binary.BigEndian.Uint32(d.Body[4:8])
 				err := mmq.MoveDC(motorID, directionBackward, mmq.speedDuty)
 				if err != nil {
 					log.Println(err)
@@ -268,7 +269,7 @@ func (mmq *BBDCMotorsMQ) autoStopInTicks(motorID uint32, ticks uint32, timeout t
 
 	for {
 
-		curState, err := mmq.motorsTicks[motorID].GetState()
+		curState, err := mmq.motorsTicks[motorID-1].GetState()
 		if err != nil {
 			log.Println(err)
 			continue
@@ -282,7 +283,12 @@ func (mmq *BBDCMotorsMQ) autoStopInTicks(motorID uint32, ticks uint32, timeout t
 			}
 		}
 
-		if (time.Since(startTs) > timeout) || (ticks == 0) {
+		if time.Since(startTs) > timeout {
+			log.Printf("autoStopInTicks: reached timeout (%d ticks remaining)\n", ticks)
+			break
+		}
+		if ticks == 0 {
+			log.Printf("autoStopInTicks: done\n")
 			break
 		}
 	}
