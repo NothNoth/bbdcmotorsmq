@@ -24,9 +24,10 @@ const directionForward = 1
 const directionBackward = 2
 
 const (
-	exchangeCtrl         = "bbdcmotors_ctrl"
-	exchangeEvents       = "bbdcmotors_events"
-	maxMoveTicksDuration = 10 * time.Second
+	exchangeCtrl                      = "bbdcmotors_ctrl"
+	exchangeEvents                    = "bbdcmotors_events"
+	maxMoveTicksDuration              = 10 * time.Second
+	ticksPerRotationBroadcastInterval = 10 * time.Second
 )
 
 type BBDCMotorsConfig struct {
@@ -290,69 +291,33 @@ func (mmq *BBDCMotorsMQ) autoStopInTicks(motorID uint32, ticks uint32, timeout t
 
 }
 
-/*
-func (mmq *BBDCMotorsMQ) millimetersToTicks(distMm uint32) uint32 {
-	return distMm * mmq.config.TicksPerRotation / mmq.config.WheelDiameterMm
-}
+func (mmq *BBDCMotorsMQ) BroadcastTicksPerRotation() error {
+	buf := make([]byte, 4)
+	binary.BigEndian.PutUint32(buf, mmq.config.TicksPerRotation)
 
-func (mmq *BBDCMotorsMQ) autoStopInTicks(ticksMotor1 uint, ticksMotor2 uint, ticksMotor3 uint, ticksMotor4 uint, timeout time.Duration) {
-	var motorsTriggers [4]bool
-	var motorsTicks [4]uint
-	startTs := time.Now()
-	motorsTicks[0] = ticksMotor1
-	motorsTicks[1] = ticksMotor2
-	motorsTicks[2] = ticksMotor3
-	motorsTicks[3] = ticksMotor4
+	lastEmit := time.Now()
 
-	for {
-		jobDone := true
-		for i := 0; i < 4; i++ {
-			curState, err := mmq.motorsTicks[i].GetState()
-			if err != nil {
-				log.Println(err)
-				continue
-			}
-			if curState != motorsTriggers[i] {
-				motorsTriggers[i] = curState
-				if (curState == true) && (motorsTicks[i] != 0) {
-					motorsTicks[i]--
-				}
-				if motorsTicks[i] == 0 {
-					mmq.StopDC(uint32(i + 1))
-				}
-			}
-			if motorsTicks[i] != 0 {
-				jobDone = false
-			}
-		}
-
-		if (time.Since(startTs) > timeout) || (jobDone == true) {
-			mmq.StopDC(1)
-			mmq.StopDC(2)
-			mmq.StopDC(3)
-			mmq.StopDC(4)
-			return
-		}
-	}
-}*/
-
-func (mmq *BBDCMotorsMQ) Worker() error {
-	var motors [4]bool
 	for {
 		if mmq.killed == true {
 			break
 		}
-		for i := 0; i < 4; i++ {
-			curState, err := mmq.motorsTicks[i].GetState()
+
+		if time.Since(lastEmit) > ticksPerRotationBroadcastInterval {
+			err := mmq.ch.Publish(
+				exchangeEvents, // exchange
+				"",             // routing key
+				false,          // mandatory
+				false,          // immediate
+				amqp.Publishing{
+					ContentType: "application/dcmotor_ticks_per_rotation",
+					Body:        buf,
+				})
 			if err != nil {
 				log.Println(err)
-				continue
 			}
-			if curState != motors[i] {
-				motors[i] = curState
-			}
+			lastEmit = time.Now()
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	return nil
@@ -550,7 +515,7 @@ func main() {
 	}()
 
 	mmq.ReceiveCommands()
-	mmq.Worker()
+	mmq.BroadcastTicksPerRotation()
 
 	mmq.Destroy()
 }
