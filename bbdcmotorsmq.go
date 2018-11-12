@@ -22,9 +22,11 @@ const defaultDCFrequency = 30
 const defaultDuty = 1000
 const directionForward = 1
 const directionBackward = 2
+
 const (
-	exchangeCtrl   = "bbdcmotors_ctrl"
-	exchangeEvents = "bbdcmotors_events"
+	exchangeCtrl         = "bbdcmotors_ctrl"
+	exchangeEvents       = "bbdcmotors_events"
+	maxMoveTicksDuration = 10 * time.Second
 )
 
 type BBDCMotorsConfig struct {
@@ -228,6 +230,28 @@ func (mmq *BBDCMotorsMQ) ReceiveCommands() error {
 				mmq.ChangeSpeedDC(3, mmq.speedDuty)
 				mmq.ChangeSpeedDC(4, mmq.speedDuty)
 				log.Printf("Changed speed to %d", mmq.speedDuty)
+			case "application/dcmotor_forward_for_ticks":
+				motorID := binary.BigEndian.Uint32(d.Body[0:3])
+				ticks := binary.BigEndian.Uint32(d.Body[4:7])
+				err := mmq.MoveDC(motorID, directionForward, mmq.speedDuty)
+				if err != nil {
+					log.Println(err)
+				} else {
+					log.Printf("DC motor %d forward for %d ticks", motorID, ticks)
+				}
+
+				go mmq.autoStopInTicks(motorID, ticks, maxMoveTicksDuration)
+			case "application/dcmotor_backward_for_ticks":
+				motorID := binary.BigEndian.Uint32(d.Body[0:3])
+				ticks := binary.BigEndian.Uint32(d.Body[4:7])
+				err := mmq.MoveDC(motorID, directionBackward, mmq.speedDuty)
+				if err != nil {
+					log.Println(err)
+				} else {
+					log.Printf("DC motor %d backward for %d ticks", motorID, ticks)
+				}
+
+				go mmq.autoStopInTicks(motorID, ticks, maxMoveTicksDuration)
 			default:
 				log.Printf("Received unexpected message: %s", d.Body)
 			}
@@ -237,6 +261,36 @@ func (mmq *BBDCMotorsMQ) ReceiveCommands() error {
 	return nil
 }
 
+func (mmq *BBDCMotorsMQ) autoStopInTicks(motorID uint32, ticks uint32, timeout time.Duration) {
+	var prevState bool
+	startTs := time.Now()
+
+	for {
+
+		curState, err := mmq.motorsTicks[motorID].GetState()
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+
+		if curState != prevState {
+			prevState = curState
+
+			if curState == true {
+				ticks--
+			}
+		}
+
+		if (time.Since(startTs) > timeout) || (ticks == 0) {
+			break
+		}
+	}
+
+	mmq.StopDC(motorID)
+
+}
+
+/*
 func (mmq *BBDCMotorsMQ) millimetersToTicks(distMm uint32) uint32 {
 	return distMm * mmq.config.TicksPerRotation / mmq.config.WheelDiameterMm
 }
@@ -280,7 +334,7 @@ func (mmq *BBDCMotorsMQ) autoStopInTicks(ticksMotor1 uint, ticksMotor2 uint, tic
 			return
 		}
 	}
-}
+}*/
 
 func (mmq *BBDCMotorsMQ) Worker() error {
 	var motors [4]bool
