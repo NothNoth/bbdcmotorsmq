@@ -28,10 +28,13 @@ const (
 )
 
 type BBDCMotorsConfig struct {
-	I2CAddress byte
-	I2CLane    int
-	GpioPin    uint
-	RmqServer  string
+	I2CAddress       byte
+	I2CLane          int
+	GpioPin          uint
+	RmqServer        string
+	WheelDiameterMm  uint32
+	TicksPerRotation uint32
+	MotorsTicksPins  []uint
 }
 
 type BBDCMotorsMQ struct {
@@ -43,6 +46,8 @@ type BBDCMotorsMQ struct {
 	ch        *amqp.Channel
 	ctrlQueue amqp.Queue
 	speedDuty uint32
+
+	motorsTicks []*bbhw.MMappedGPIO
 }
 
 func InitBBDCMotorsMQ(configFile string) (*BBDCMotorsMQ, error) {
@@ -73,6 +78,16 @@ func InitBBDCMotorsMQ(configFile string) (*BBDCMotorsMQ, error) {
 	}
 	time.Sleep(defaultWait)
 
+	//Setup GPIO for motors counters
+	mmq.motorsTicks[0] = bbhw.NewMMappedGPIO(mmq.config.MotorsTicksPins[0], bbhw.IN)
+	mmq.motorsTicks[1] = bbhw.NewMMappedGPIO(mmq.config.MotorsTicksPins[1], bbhw.IN)
+	mmq.motorsTicks[2] = bbhw.NewMMappedGPIO(mmq.config.MotorsTicksPins[2], bbhw.IN)
+	mmq.motorsTicks[3] = bbhw.NewMMappedGPIO(mmq.config.MotorsTicksPins[3], bbhw.IN)
+
+	if mmq.motorsTicks[0] == nil || mmq.motorsTicks[1] == nil || mmq.motorsTicks[2] == nil || mmq.motorsTicks[3] == nil || mmq.ctrl == nil || mmq.i2c == nil {
+		log.Println("Failed to setup GPIO")
+		return nil, nil
+	}
 	//Setup AMQP
 	mmq.conn, err = amqp.Dial(mmq.config.RmqServer)
 	if err != nil {
@@ -143,7 +158,21 @@ func InitBBDCMotorsMQ(configFile string) (*BBDCMotorsMQ, error) {
 }
 
 func (mmq *BBDCMotorsMQ) Destroy() {
-	mmq.ctrl.Close()
+	if mmq.motorsTicks[0] != nil {
+		mmq.motorsTicks[0].Close()
+	}
+	if mmq.motorsTicks[1] != nil {
+		mmq.motorsTicks[1].Close()
+	}
+	if mmq.motorsTicks[2] != nil {
+		mmq.motorsTicks[2].Close()
+	}
+	if mmq.motorsTicks[3] != nil {
+		mmq.motorsTicks[3].Close()
+	}
+	if mmq.ctrl != nil {
+		mmq.ctrl.Close()
+	}
 	mmq.i2c.Close()
 }
 
@@ -208,12 +237,68 @@ func (mmq *BBDCMotorsMQ) ReceiveCommands() error {
 	return nil
 }
 
-func (mmq *BBDCMotorsMQ) EmitEvents() error {
+func (mmq *BBDCMotorsMQ) millimetersToTicks(distMm uint32) uint32 {
+	return distMm * mmq.config.TicksPerRotation / mmq.config.WheelDiameterMm
+}
+
+func (mmq *BBDCMotorsMQ) autoStopInTicks(ticksMotor1 uint, ticksMotor2 uint, ticksMotor3 uint, ticksMotor4 uint, timeout time.Duration) {
+	var motorsTriggers [4]bool
+	var motorsTicks [4]uint
+	startTs := time.Now()
+	motorsTicks[0] = ticksMotor1
+	motorsTicks[1] = ticksMotor2
+	motorsTicks[2] = ticksMotor3
+	motorsTicks[3] = ticksMotor4
+
+	for {
+		jobDone := true
+		for i := 0; i < 4; i++ {
+			curState, err := mmq.motorsTicks[i].GetState()
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+			if curState != motorsTriggers[i] {
+				motorsTriggers[i] = curState
+				if (curState == true) && (motorsTicks[i] != 0) {
+					motorsTicks[i]--
+				}
+				if motorsTicks[i] == 0 {
+					mmq.StopDC(uint32(i + 1))
+				}
+			}
+			if motorsTicks[i] != 0 {
+				jobDone = false
+			}
+		}
+
+		if (time.Since(startTs) > timeout) || (jobDone == true) {
+			mmq.StopDC(1)
+			mmq.StopDC(2)
+			mmq.StopDC(3)
+			mmq.StopDC(4)
+			return
+		}
+	}
+}
+
+func (mmq *BBDCMotorsMQ) Worker() error {
+	var motors [4]bool
 	for {
 		if mmq.killed == true {
 			break
 		}
-		time.Sleep(100 * time.Millisecond)
+		for i := 0; i < 4; i++ {
+			curState, err := mmq.motorsTicks[i].GetState()
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+			if curState != motors[i] {
+				motors[i] = curState
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	return nil
@@ -411,7 +496,7 @@ func main() {
 	}()
 
 	mmq.ReceiveCommands()
-	mmq.EmitEvents()
+	mmq.Worker()
 
 	mmq.Destroy()
 }
