@@ -26,7 +26,7 @@ const directionBackward = 2
 const (
 	exchangeCtrl                      = "bbdcmotors_ctrl"
 	exchangeEvents                    = "bbdcmotors_events"
-	maxMoveTicksDuration              = 10 * time.Second
+	maxMoveTicksDuration              = 60 * time.Second
 	ticksPerRotationBroadcastInterval = 10 * time.Second
 )
 
@@ -292,9 +292,24 @@ func (mmq *BBDCMotorsMQ) autoStopInTicks(motorID uint32, ticks uint32, timeout t
 			break
 		}
 	}
-
+	//Stop motor
 	mmq.StopDC(motorID)
 
+	//Send notification
+	buf := make([]byte, 4)
+	binary.BigEndian.PutUint32(buf, motorID)
+	err := mmq.ch.Publish(
+		exchangeEvents, // exchange
+		"",             // routing key
+		false,          // mandatory
+		false,          // immediate
+		amqp.Publishing{
+			ContentType: "application/dcmotor_autostop",
+			Body:        buf,
+		})
+	if err != nil {
+		log.Println(err)
+	}
 }
 
 func (mmq *BBDCMotorsMQ) BroadcastTicksPerRotation() error {

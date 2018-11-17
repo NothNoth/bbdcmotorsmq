@@ -25,3 +25,4 @@ By default all motors are enabled and stopped.
 | bbdcmotors_ctrl   | IN     | application/dcmotor_stop               | uint32 [1-4]          | Set motor to stopped state                               |
 | bbdcmotors_ctrl   | IN     | application/dcmotor_speed              | uint32 [1-100]        | Change all motors speed in % (default duty is 30).       |
 | bbdcmotors_events | OUT    | application/dcmotor_ticks_per_rotation | uint32                | Number of ticks per rotation (sent at regular intervals) |
+| bbdcmotors_events | OUT    | application/dcmotor_autostop           | uint32 [1-4]          | Emitted once an dcmotor_forward_for_ticks or dcmotor_backward_for_ticks is completed |
